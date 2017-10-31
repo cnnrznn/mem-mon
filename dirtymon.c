@@ -98,7 +98,31 @@ read_range(int mfd, long unsigned *start, long unsigned *end)
 static void
 print_dirty_ranges(int pmfd, long unsigned start, long unsigned end)
 {
-    // TODO
+    off_t pos, pos_end;
+    const long unsigned page_size = getpagesize();
+    long pinfo;
+    int rc;
+
+    pos = start / page_size;
+    pos_end = end / page_size;
+
+    // 1. seek to start/page_size
+    pos = lseek(pmfd, pos, SEEK_SET);
+    if (pos == (off_t)-1) {
+        fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
+        exit(1);
+    }
+
+    // 2. read 64 bytes for every page in region
+    while (pos < pos_end) {
+        rc = read(pmfd, &pinfo, sizeof(long));
+        if (rc < sizeof(long)) {
+            fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
+            exit(1);
+        }
+        if (pinfo & ((long)1 << 55)) {
+        }
+    }
 }
 
 static void
