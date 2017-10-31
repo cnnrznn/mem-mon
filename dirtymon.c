@@ -8,32 +8,34 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+static struct itimerval itimer;
+
 static int (*real__libc_start_main) (int (*main) (int, char**, char**), int argc, char *argv, void (*init) (void), void (*fini) (void), void (*rtld_fini) (void), void *stack_end);
 
 static void
-open_proc_files(FILE **mf, FILE **pmf)
+open_proc_files(int *mfd, int *pmfd)
 {
-    *mf = fopen("/proc/self/maps", "r");
-    if (!*mf) {
+    *mfd = open("/proc/self/maps", O_RDONLY);
+    if (*mfd < 0) {
         fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
         exit(1);
     }
 
-    *pmf = fopen("/proc/self/pagemap", "r");
-    if (!*pmf) {
+    *pmfd = open("/proc/self/pagemap", O_RDONLY);
+    if (*pmfd < 0) {
         fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
         exit(1);
     }
 }
 
 static void
-close_proc_files(FILE *mf, FILE *pmf)
+close_proc_files(int mfd, int pmfd)
 {
-    if (fclose(mf)) {
+    if (close(mfd)) {
         fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
         exit(1);
     }
-    if (fclose(pmf)) {
+    if (close(pmfd)) {
         fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
         exit(1);
     }
@@ -62,51 +64,71 @@ clear_soft_dirty(void)
 }
 
 static int
-read_range(FILE *mf, long unsigned *start, long unsigned *end)
+read_range(int mfd, long unsigned *start, long unsigned *end)
 {
-    int rc;
+    int rc, i;
+    char line[256];
 
-    // 1. fscanf (%lx-%lx)
-    rc = fscanf(mf, "%lx-%lx", start, end);
+    i = 0;
+    while ((rc = read(mfd, line+i, 1)) == 1) {
+        if (line[i] == '\n') {
+            line[i] = '\0';
+            break;
+        }
+        i++;
+    }
 
-    if (rc == 2)
-        return 1;
-
-    else if (rc == EOF)
+    if (rc == 0) {
         return 0;
-
-    else {
+    }
+    else if (rc < 0) {
         fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
         exit(1);
     }
+
+    rc = sscanf(line, "%lx-%lx", start, end);
+    if (rc < 2) {
+        fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
+        exit(1);
+    }
+
+    return 1;
 }
 
 static void
-print_dirty_ranges(FILE *pmf, long unsigned start, long unsigned end)
+print_dirty_ranges(int pmfd, long unsigned start, long unsigned end)
 {
     // TODO
-    fprintf(stderr, "%lx-%lx\n", start, end);
 }
 
 static void
 dirty_handler(int sig)
 {
-    FILE *mf, *pmf;
+    int mfd, pmfd;
     long unsigned start, end;
+    int rc;
 
     // 0. open maps, pagemap
-    open_proc_files(&mf, &pmf);
+    open_proc_files(&mfd, &pmfd);
 
     // 1. read /proc/self/maps to find range of [heap]
-    while (read_range(mf, &start, &end)) {
-        print_dirty_ranges(pmf, start, end);
+    while (read_range(mfd, &start, &end)) {
+        fprintf(stderr, "%lx-%lx\n", start, end);
+        print_dirty_ranges(pmfd, start, end);
     }
     fprintf(stderr, "\n");
 
-    close_proc_files(mf, pmf);
+    close_proc_files(mfd, pmfd);
 
     // 4. clear soft-dirty bit
     clear_soft_dirty();
+
+    // 5. reset timer
+    rc = setitimer(ITIMER_VIRTUAL, &itimer, NULL);
+    if (rc) {
+        fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
+        exit(1);
+    }
 }
 
 int __libc_start_main(int (*main) (int, char**, char**), int argc, char *argv, void (*init) (void), void (*fini) (void), void (*rtld_fini) (void), void *stack_end)
@@ -114,7 +136,7 @@ int __libc_start_main(int (*main) (int, char**, char**), int argc, char *argv, v
     int rc;
 
     // 1. setup handler on timer (settimer)
-    sighandler_t sig = signal(SIGPROF, dirty_handler);
+    sighandler_t sig = signal(SIGVTALRM, dirty_handler);
     if (sig == SIG_ERR) {
         fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
         exit(1);
@@ -122,14 +144,18 @@ int __libc_start_main(int (*main) (int, char**, char**), int argc, char *argv, v
 
     // 2. schedule for signals to be sent to the application
     struct timeval tv = {
+            .tv_sec = 1,
+            .tv_usec = 0,
+        };
+    struct timeval zero = {
             .tv_sec = 0,
-            .tv_usec = 10000,
+            .tv_usec = 0,
         };
-    struct itimerval itimer = { 
-            .it_interval    = tv,
-            .it_value       = tv,
-        };
-    rc = setitimer(ITIMER_PROF, &itimer, NULL);
+
+    itimer.it_interval    = zero;
+    itimer.it_value       = tv;
+
+    rc = setitimer(ITIMER_VIRTUAL, &itimer, NULL);
     if (rc) {
         fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
         exit(1);
