@@ -103,8 +103,8 @@ print_dirty_ranges(int pmfd, long unsigned start, long unsigned end)
     long pinfo;
     int rc;
 
-    pos = start / page_size;
-    pos_end = end / page_size;
+    pos = (start / page_size) * sizeof(long);
+    pos_end = (end / page_size) * sizeof(long);
 
     // 1. seek to start/page_size
     pos = lseek(pmfd, pos, SEEK_SET);
@@ -116,12 +116,17 @@ print_dirty_ranges(int pmfd, long unsigned start, long unsigned end)
     // 2. read 64 bytes for every page in region
     while (pos < pos_end) {
         rc = read(pmfd, &pinfo, sizeof(long));
+        if (rc == 0)
+            return;
         if (rc < sizeof(long)) {
             fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
             exit(1);
         }
-        if (pinfo & ((long)1 << 55)) {
-        }
+
+        if (pinfo & ((long)1 << 55))
+            fprintf(stderr, "%lx\n", (pos * page_size) / sizeof(long));
+
+        pos += sizeof(long);
     }
 }
 
@@ -137,7 +142,6 @@ dirty_handler(int sig)
 
     // 1. read /proc/self/maps to find range of [heap]
     while (read_range(mfd, &start, &end)) {
-        fprintf(stderr, "%lx-%lx\n", start, end);
         print_dirty_ranges(pmfd, start, end);
     }
     fprintf(stderr, "\n");
@@ -168,7 +172,7 @@ int __libc_start_main(int (*main) (int, char**, char**), int argc, char *argv, v
 
     // 2. schedule for signals to be sent to the application
     struct timeval tv = {
-            .tv_sec = 1,
+            .tv_sec = 10,
             .tv_usec = 0,
         };
     struct timeval zero = {
