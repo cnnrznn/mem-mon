@@ -86,6 +86,7 @@ read_range(int mfd, long unsigned *start, long unsigned *end)
         exit(1);
     }
 
+    //fprintf(stderr, "%s\n", line);
     rc = sscanf(line, "%lx-%lx", start, end);
     if (rc < 2) {
         fprintf(stderr, "(%s:%d)", __FILE__, __LINE__);
@@ -124,7 +125,9 @@ print_dirty_ranges(int pmfd, long unsigned start, long unsigned end)
         }
 
         if (pinfo & ((long)1 << 55))
-            fprintf(stderr, "%lx\n", (pos * page_size) / sizeof(long));
+            fprintf(stderr, "%lu, 1\n", (pos * page_size) / sizeof(long));
+        else
+            fprintf(stderr, "%lu, 0\n", (pos * page_size) / sizeof(long));
 
         pos += sizeof(long);
     }
@@ -142,7 +145,9 @@ dirty_handler(int sig)
 
     // 1. read /proc/self/maps to find range of [heap]
     while (read_range(mfd, &start, &end)) {
-        print_dirty_ranges(pmfd, start, end);
+        if (start == 0x6cd000)
+            print_dirty_ranges(pmfd, start, end);
+        //fprintf(stderr, "%lx-%lx\n", start, end);
     }
     fprintf(stderr, "\n");
 
@@ -172,7 +177,7 @@ int __libc_start_main(int (*main) (int, char**, char**), int argc, char *argv, v
 
     // 2. schedule for signals to be sent to the application
     struct timeval tv = {
-            .tv_sec = 10,
+            .tv_sec = 2,
             .tv_usec = 0,
         };
     struct timeval zero = {
