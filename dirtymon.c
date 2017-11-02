@@ -41,7 +41,7 @@ close_proc_files(int mfd, int pmfd)
     }
 }
 
-static void
+void
 clear_soft_dirty(void)
 {
     int fd;
@@ -133,7 +133,7 @@ print_dirty_ranges(int pmfd, long unsigned start, long unsigned end)
     }
 }
 
-static void
+void
 dirty_handler(int sig)
 {
     int mfd, pmfd;
@@ -145,7 +145,8 @@ dirty_handler(int sig)
 
     // 1. read /proc/self/maps to find range of [heap]
     while (read_range(mfd, &start, &end)) {
-        if (start == 0x6cd000)
+        //if (start == 0x6cd000)
+        //if (start == 0x7ffff4ef6000)
             print_dirty_ranges(pmfd, start, end);
         //fprintf(stderr, "%lx-%lx\n", start, end);
     }
@@ -195,6 +196,7 @@ int __libc_start_main(int (*main) (int, char**, char**), int argc, char *argv, v
     }
 
     // 2a. (OPTIONAL) clear dirty pages flag
+    clear_soft_dirty();
 
     // 3. link real__libc_start_main()
     real__libc_start_main = dlsym(RTLD_NEXT, "__libc_start_main");
